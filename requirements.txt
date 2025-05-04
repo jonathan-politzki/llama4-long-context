@@ -6,7 +6,7 @@ torch
 # Hugging Face Libraries
 transformers>=4.40.0 # Use a recent version
 accelerate>=0.30.0   # Needed for device_map="auto"
-# bitsandbytes>=0.43.0 # Needed for 4-bit quantization (Commented out for macOS compatibility)
+bitsandbytes>=0.43.0 # Needed for 4-bit quantization (Commented out for macOS compatibility)
 
 # Optional: For potential speedups (requires separate installation & setup)
-# flash-attn>=2.5.8 # Uncomment if using attn_implementation="flash_attention_2" 
+# flash-attn>=2.5.8 # Uncomment if using attn_implementation="flash_attention_2"

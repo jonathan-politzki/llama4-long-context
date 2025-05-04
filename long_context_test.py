@@ -12,7 +12,7 @@ QUESTION = "What is the secret passphrase for the blueberry muffin recipe?"
 
 # --- Hugging Face Model Configuration ---
 # !!! IMPORTANT: Replace with the actual model ID when released !!!
-MODEL_ID = "meta-llama/Llama-4-Scout-10M-hf" # Placeholder ID
+MODEL_ID = "meta-llama/Llama-4-Scout-17B-16E-Instruct"  # Official ID from Hugging Face
 
 # Configuration for 4-bit quantization (requires bitsandbytes)
 USE_4BIT_QUANTIZATION = False # Set to False if not using quantization or hardware doesn't support it well
@@ -94,7 +94,7 @@ def main():
                 bnb_4bit_use_double_quant=True, # Optional, can improve quality slightly
              )
 
-        print(f"Loading tokenizer for {MODEL_ID}...")
+        print(f"DEBUG: Attempting to load tokenizer with MODEL_ID = {MODEL_ID}")
         # Trust remote code if required by the specific model implementation
         tokenizer = AutoTokenizer.from_pretrained(MODEL_ID, trust_remote_code=True)
         # Set padding token if not already set (common practice)
