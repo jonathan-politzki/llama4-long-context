@@ -66,7 +66,7 @@ def main():
 
     # --- Prepare for LLM Interaction ---
     print("\n--- Preparing for Hugging Face Model Interaction ---")
-    print(f"Model ID (Placeholder): {MODEL_ID}")
+    print(f"Model ID: {MODEL_ID}")
     print(f"Prompt length (approx characters): {len(final_prompt):,}")
 
     # Clear some memory before loading model if possible
@@ -102,6 +102,7 @@ def main():
             tokenizer.pad_token = tokenizer.eos_token
         print("Tokenizer loaded.")
 
+        print(f"DEBUG: Attempting to load model with MODEL_ID = {MODEL_ID}")
         print(f"Loading model {MODEL_ID}...")
         model = AutoModelForCausalLM.from_pretrained(
             MODEL_ID,
