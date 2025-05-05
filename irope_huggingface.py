@@ -403,7 +403,6 @@ class IRoPEModel(RoFormerModel):
 
         embedding_output = self.embeddings(
             input_ids=input_ids,
-            position_ids=position_ids,
             token_type_ids=token_type_ids,
             inputs_embeds=inputs_embeds,
             past_key_values_length=past_key_values_length,
