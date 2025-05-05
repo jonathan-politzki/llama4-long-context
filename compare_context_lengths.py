@@ -19,7 +19,7 @@ import gc
 from typing import Dict, List, Tuple, Optional
 
 # Import standard RoFormer and our iRoPE implementation
-from transformers import RoFormerModel, RoFormerConfig, RoFormerTokenizer
+from transformers import RoFormerModel, RoFormerConfig, BertTokenizer
 from irope_huggingface import IRoPEModel, IRoPEConfig
 
 
@@ -188,8 +188,8 @@ def run_comparison(
     )
     irope_model = IRoPEModel(irope_config)
     
-    # Tokenizer (we'll use RoFormer's)
-    tokenizer = RoFormerTokenizer.from_pretrained("junnyu/roformer_chinese_base")
+    # Tokenizer (we'll use BERT's to avoid Chinese tokenizer dependency)
+    tokenizer = BertTokenizer.from_pretrained("bert-base-uncased")
     
     # Results storage
     results = {
