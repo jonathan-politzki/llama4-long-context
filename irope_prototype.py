@@ -41,30 +41,38 @@ class RotaryPositionalEmbedding(nn.Module):
         inv_freq = 1.0 / (base ** (torch.arange(0, dim, 2).float() / dim))
         self.register_buffer("inv_freq", inv_freq)
         
+    def _rotate_half(self, x):
+        """Rotates half the hidden dims of the input."""
+        x1 = x[..., : x.shape[-1] // 2]
+        x2 = x[..., x.shape[-1] // 2 :]
+        return torch.cat((-x2, x1), dim=-1)
+        
     def forward(self, x: torch.Tensor, seq_len: Optional[int] = None) -> torch.Tensor:
+        batch_size, num_heads, seq_length, hidden_size = x.shape
+        
         if seq_len is None:
-            seq_len = x.shape[1]
+            seq_len = seq_length
         
         # Apply scaling for better extrapolation to longer sequences
-        scaled_time = torch.arange(seq_len, device=x.device).float() / self.scale_factor
+        # Create position indices tensor [0, 1, 2, ..., seq_len-1]
+        positions = torch.arange(seq_len, device=x.device).float()
+        positions = positions / self.scale_factor  # Apply scaling
         
-        # Compute the sinusoidal positional encodings
-        sinusoid_inp = torch.einsum("i,j->ij", scaled_time, self.inv_freq)
+        # Create sinusoidal pattern for each position and frequency
+        # Shape: [seq_len, dim//2]
+        freqs = torch.outer(positions, self.inv_freq)
         
-        # Apply sinusoidal positional encodings
-        sin, cos = torch.sin(sinusoid_inp), torch.cos(sinusoid_inp)
+        # Create complex-valued embeddings e^(i * freqs)
+        # [seq_len, hidden_size//2] -> [seq_len, hidden_size]
+        emb = torch.cat((freqs, freqs), dim=-1)
         
-        # Compute rotations
-        # This simplified version just demonstrates the concept
-        x1, x2 = x[..., ::2], x[..., 1::2]
+        # Create sin and cos patterns
+        sin = torch.sin(emb).unsqueeze(0).unsqueeze(0)  # [1, 1, seq_len, hidden_size]
+        cos = torch.cos(emb).unsqueeze(0).unsqueeze(0)  # [1, 1, seq_len, hidden_size]
         
-        # Apply rotations
-        rotated_x = torch.cat([
-            x1 * cos.unsqueeze(-1) - x2 * sin.unsqueeze(-1),
-            x2 * cos.unsqueeze(-1) + x1 * sin.unsqueeze(-1)
-        ], dim=-1)
-        
-        return rotated_x
+        # Apply rotations using complex number multiplication formulas
+        # This handles broadcasting correctly
+        return x * cos + self._rotate_half(x) * sin
 
 
 class AttentionWithRoPE(nn.Module):
@@ -427,6 +435,15 @@ def demo_irope_model():
     
     print(f"\nOutput shape: {output.shape}")
     print("Successfully processed through iRoPE model!")
+    
+    # Try a longer sample to test extrapolation
+    print("\nTesting with a longer sequence...")
+    long_seq_length = 1024
+    long_input_ids = torch.randint(0, model.vocab_size, (1, long_seq_length))
+    with torch.no_grad():
+        long_output = model(long_input_ids)
+    print(f"Longer output shape: {long_output.shape}")
+    print("Successfully processed longer sequence!")
 
 
 if __name__ == "__main__":
