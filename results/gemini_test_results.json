@@ -1,0 +1,51 @@
+[
+  {
+    "timestamp": "2025-05-05 14:52:44",
+    "model": "models/gemini-1.5-pro-latest",
+    "target_char_count": 8000000,
+    "needle": "The secret recipe for the best chocolate croissant requires refrigeration for exactly 37 hours.",
+    "question": "What is the refrigeration time for the chocolate croissant recipe?",
+    "actual_char_count": 8000000,
+    "needle_position_percent": 50.0,
+    "prompt_length_chars": 8000364,
+    "estimated_tokens": 2000091,
+    "generation_time_seconds": 68.43238711357117,
+    "response": "37 hours\n",
+    "needle_found": false,
+    "needle_key": "The secret recipe for the best chocolate croissant requires refrigeration for exactly 37 hours.",
+    "status": "failure"
+  },
+  {
+    "timestamp": "2025-05-05 14:54:46",
+    "model": "models/gemini-1.5-pro-latest",
+    "target_char_count": 8000000,
+    "needle": "The secret recipe for the best chocolate croissant requires refrigeration for exactly 37 hours.",
+    "question": "What is the refrigeration time for the chocolate croissant recipe?",
+    "actual_char_count": 8000000,
+    "needle_position_percent": 50.0,
+    "prompt_length_chars": 8000364,
+    "estimated_tokens": 2000091,
+    "generation_time_seconds": 62.09338331222534,
+    "response": "37 hours\n",
+    "needle_found": true,
+    "needle_key": "The secret recipe for the best chocolate croissant requires refrigeration for exactly 37 hours.",
+    "status": "success"
+  },
+  {
+    "timestamp": "2025-05-05 14:57:32",
+    "model": "models/gemini-1.5-pro-latest",
+    "target_char_count": 8000000,
+    "needle": "The secret recipe for the best chocolate croissant requires refrigeration for exactly 37 hours.",
+    "question": "What is the refrigeration time for the chocolate croissant recipe?",
+    "actual_char_count": 8000000,
+    "needle_position_percent": 50.0,
+    "prompt_length_chars": 8000364,
+    "estimated_tokens": 2000091,
+    "generation_time_seconds": 68.7899341583252,
+    "response": "37 hours\n",
+    "needle_found": true,
+    "needle_key": "The secret recipe for the best chocolate croissant requires refrigeration for exactly 37 hours.",
+    "answer_key": "37 hours",
+    "status": "success"
+  }
+]

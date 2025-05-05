@@ -47,7 +47,7 @@ def get_model_info():
         print(f"❌ Error listing Gemini models: {e}")
         return []
 
-def run_gemini_test(char_count, needle, question, needle_key=None, position_percentage=50):
+def run_gemini_test(char_count, needle, question, needle_key=None, position_percentage=50, answer_key=None):
     """
     Run a needle-in-haystack test with Gemini.
     
@@ -57,6 +57,7 @@ def run_gemini_test(char_count, needle, question, needle_key=None, position_perc
         question: The question to ask to find the needle
         needle_key: The key piece to look for in the response (defaults to needle if None)
         position_percentage: Where to place the needle (0-100% through document)
+        answer_key: Specific answer to look for in the response
     
     Returns:
         Dictionary with test results
@@ -118,9 +119,11 @@ def run_gemini_test(char_count, needle, question, needle_key=None, position_perc
         
         # Evaluate if the needle was found
         needle_key_to_check = needle_key or (needle.split("'")[1] if "'" in needle else needle)
-        success = evaluate_response(response_text, needle_key_to_check)
+        success = evaluate_response(response_text, needle_key_to_check, answer_key=answer_key)
         test_stats["needle_found"] = success
         test_stats["needle_key"] = needle_key_to_check
+        if answer_key:
+            test_stats["answer_key"] = answer_key
         
         # Log success/failure
         print(f"\n{'✅ SUCCESS' if success else '❌ FAILURE'}: Gemini {'found' if success else 'did not find'} the needle.")

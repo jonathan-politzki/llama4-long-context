@@ -23,7 +23,21 @@ Response times increased linearly with context size:
 
 This represents approximately a 37x increase in context size with only a 37x increase in processing time, demonstrating near-perfect linear scaling.
 
-### 3. Cost Efficiency
+### 3. Custom Needle Tests
+We tested with custom needles to verify the model isn't relying on training data patterns:
+- **Original needle**: "The secret passphrase is 'GeminiLongContext2024'."
+- **Custom needle**: "The secret recipe for the best chocolate croissant requires refrigeration for exactly 37 hours."
+
+In both cases, Gemini successfully extracted the key information from a 2M token context, demonstrating its robust information retrieval capabilities regardless of content.
+
+### 4. Response Behavior
+An interesting observation is that Gemini doesn't simply repeat the needle verbatim - it extracts the specific information requested. For example:
+- Question: "What is the refrigeration time for the chocolate croissant recipe?"
+- Answer: "37 hours" (not the entire needle text)
+
+This behavior suggests sophisticated understanding of question-answering rather than simple pattern matching.
+
+### 5. Cost Efficiency
 The API-based approach offers significant advantages:
 - No specialized hardware requirements
 - No RAM/VRAM limitations
@@ -46,7 +60,7 @@ The API-based approach offers significant advantages:
 
 ## Next Steps
 
-1. **Enhanced Testing**: Modify our test framework to support custom needle contents to verify retrieval isn't relying on training data patterns.
+1. **Enhanced Testing**: Continue testing with varied needle content to further validate retrieval capabilities.
 
 2. **Comparative Analysis**: Conduct detailed comparison between Gemini, Claude, and Llama models at various context lengths.
 

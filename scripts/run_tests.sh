@@ -23,6 +23,7 @@ show_help() {
   echo "  --position POS     Position of the needle (0-100, default: 50)"
   echo "  --needle TEXT      Custom needle text to insert in the document"
   echo "  --question TEXT    Custom question to ask about the needle"
+  echo "  --answer TEXT      Specific answer to look for in the response (e.g., '37 hours')"
   echo ""
   echo "Examples:"
   echo "  $0 llama-small"
@@ -82,6 +83,7 @@ run_gemini() {
   pos=50
   needle=""
   question=""
+  answer=""
   
   # Parse command line arguments
   while [ $# -gt 0 ]; do
@@ -102,6 +104,10 @@ run_gemini() {
         question="$2"
         shift 2
         ;;
+      --answer)
+        answer="$2"
+        shift 2
+        ;;
       *)
         echo "Unknown option: $1"
         show_help
@@ -117,6 +123,9 @@ run_gemini() {
   fi
   if [ -n "$question" ]; then
     cmd="$cmd --question '$question'"
+  fi
+  if [ -n "$answer" ]; then
+    cmd="$cmd --answer '$answer'"
   fi
   
   # Run the command

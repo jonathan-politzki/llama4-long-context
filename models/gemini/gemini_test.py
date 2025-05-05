@@ -39,6 +39,9 @@ def parse_args():
     parser.add_argument("--key", type=str, default=None,
                         help="Specific key to check for in the response (defaults to extracting from needle)")
     
+    parser.add_argument("--answer", type=str, default=None,
+                        help="Specific answer to look for (e.g., '37 hours')")
+    
     # Scaling test parameters
     parser.add_argument("--scaling-test", action="store_true",
                         help="Run a scaling test with multiple sizes")
@@ -74,7 +77,8 @@ def run_scaling_test(args):
             needle=args.needle,
             question=args.question,
             needle_key=args.key,
-            position_percentage=args.position
+            position_percentage=args.position,
+            answer_key=args.answer
         )
         
         results.append(result)
@@ -120,7 +124,8 @@ def main():
             needle=args.needle,
             question=args.question,
             needle_key=args.key,
-            position_percentage=args.position
+            position_percentage=args.position,
+            answer_key=args.answer
         )
         
         # Save results
