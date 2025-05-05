@@ -29,7 +29,8 @@ from transformers.models.roformer.modeling_roformer import (
     RoFormerSelfAttention,
     RoFormerLayer,
     RoFormerEncoder,
-    RoFormerEmbeddings
+    RoFormerEmbeddings,
+    RoFormerSinusoidalPositionalEmbedding
 )
 
 
@@ -91,6 +92,7 @@ class IRoPESelfAttention(RoFormerSelfAttention):
         self,
         hidden_states,
         attention_mask=None,
+        sinusoidal_pos=None,
         head_mask=None,
         encoder_hidden_states=None,
         encoder_attention_mask=None,
@@ -105,14 +107,16 @@ class IRoPESelfAttention(RoFormerSelfAttention):
         query_layer = self.transpose_for_scores(mixed_query_layer)
 
         # Apply RoPE only if this layer is configured to use it
-        if self.use_rope:
-            # Get seq_len for temperature scaling
-            seq_length = hidden_states.size(1)
-            
+        if self.use_rope and sinusoidal_pos is not None:
             # Apply RoFormer's rotary embeddings
-            query_layer, key_layer = self.apply_rotary_position_embeddings(
-                self.rotary_embeddings, query_layer, key_layer
-            )
+            sinusoidal_pos = sinusoidal_pos[:, :, : query_layer.shape[-2] * 2, :]
+            sin, cos = torch.chunk(sinusoidal_pos, 2, dim=-1)
+            sin_pos = torch.stack([sin, sin], dim=-1).reshape(sinusoidal_pos.shape)  # (batch_size, num_heads, seq_len, head_dim)
+            cos_pos = torch.stack([cos, cos], dim=-1).reshape(sinusoidal_pos.shape)  # (batch_size, num_heads, seq_len, head_dim)
+            
+            # Rotary embeddings
+            query_layer = self._apply_rotary(query_layer, sin_pos, cos_pos)
+            key_layer = self._apply_rotary(key_layer, sin_pos, cos_pos)
             
         # Calculate attention scores
         attention_scores = torch.matmul(query_layer, key_layer.transpose(-1, -2))
@@ -149,6 +153,19 @@ class IRoPESelfAttention(RoFormerSelfAttention):
         outputs = (context_layer, attention_probs) if output_attentions else (context_layer,)
         
         return outputs
+        
+    def _apply_rotary(self, x, sin, cos):
+        # Apply rotary embeddings
+        sin = sin[:, :, :x.shape[2], :]
+        cos = cos[:, :, :x.shape[2], :]
+        x_embed = (x * cos) + (self._rotate_half(x) * sin)
+        return x_embed
+        
+    def _rotate_half(self, x):
+        """Rotates half the hidden dims of the input."""
+        x1 = x[..., : x.shape[-1] // 2]
+        x2 = x[..., x.shape[-1] // 2 :]
+        return torch.cat((-x2, x1), dim=-1)
 
 
 class IRoPELayer(RoFormerLayer):
@@ -170,19 +187,119 @@ class IRoPELayer(RoFormerLayer):
             self.intermediate_act_fn = getattr(F, config.hidden_act)
         else:
             self.intermediate_act_fn = config.hidden_act
+            
+    def forward(
+        self,
+        hidden_states,
+        attention_mask=None,
+        sinusoidal_pos=None,
+        head_mask=None,
+        encoder_hidden_states=None,
+        encoder_attention_mask=None,
+        past_key_value=None,
+        output_attentions=False,
+    ):
+        # Self-attention with positional embedding if appropriate for this layer
+        layer_outputs = self.attention(
+            self.LayerNorm(hidden_states),
+            attention_mask,
+            sinusoidal_pos=sinusoidal_pos,
+            head_mask=head_mask,
+            output_attentions=output_attentions,
+            past_key_value=past_key_value,
+        )
+        attention_output = layer_outputs[0]
+        outputs = layer_outputs[1:]  # add self attentions if we output attention weights
+
+        # Feed forward
+        hidden_states = hidden_states + self.dropout(attention_output)
+        intermediate_output = self.intermediate(self.LayerNorm(hidden_states))
+        if isinstance(self.intermediate_act_fn, str):
+            intermediate_output = getattr(F, self.intermediate_act_fn)(intermediate_output)
+        else:
+            intermediate_output = self.intermediate_act_fn(intermediate_output)
+        hidden_states = hidden_states + self.dropout(self.output(intermediate_output))
+        
+        outputs = (hidden_states,) + outputs
+        return outputs
 
 
-class IRoPEEncoder(RoFormerEncoder):
+class IRoPEEncoder(nn.Module):
     """
-    Modified RoFormerEncoder that uses our custom IRoPELayer.
+    Modified RoFormerEncoder that uses our custom IRoPELayer and handles positional embeddings.
     """
     def __init__(self, config):
-        super(RoFormerEncoder, self).__init__()
+        super().__init__()
         self.config = config
         self.layer = nn.ModuleList(
             [IRoPELayer(config, layer_idx=i) for i in range(config.num_hidden_layers)]
         )
         self.gradient_checkpointing = False
+        
+        # Initialize positional embeddings
+        self.embed_positions = RoFormerSinusoidalPositionalEmbedding(
+            config.max_position_embeddings,
+            config.hidden_size // config.num_attention_heads // 2,
+            padding_idx=config.pad_token_id,
+        )
+    
+    def forward(
+        self,
+        hidden_states,
+        attention_mask=None,
+        head_mask=None,
+        encoder_hidden_states=None,
+        encoder_attention_mask=None,
+        past_key_values=None,
+        use_cache=None,
+        output_attentions=False,
+        output_hidden_states=False,
+        return_dict=True,
+    ):
+        all_hidden_states = () if output_hidden_states else None
+        all_self_attentions = () if output_attentions else None
+        all_cross_attentions = () if output_attentions and encoder_hidden_states is not None else None
+
+        # Generate positional embeddings
+        seq_length = hidden_states.shape[1]
+        past_key_values_length = 0
+        sinusoidal_pos = self.embed_positions(hidden_states.shape[:-1], past_key_values_length)[None, None, :, :]
+
+        for i, layer_module in enumerate(self.layer):
+            if output_hidden_states:
+                all_hidden_states = all_hidden_states + (hidden_states,)
+
+            layer_head_mask = head_mask[i] if head_mask is not None else None
+            past_key_value = past_key_values[i] if past_key_values is not None else None
+
+            layer_outputs = layer_module(
+                hidden_states,
+                attention_mask=attention_mask,
+                sinusoidal_pos=sinusoidal_pos,
+                head_mask=layer_head_mask,
+                encoder_hidden_states=encoder_hidden_states,
+                encoder_attention_mask=encoder_attention_mask,
+                past_key_value=past_key_value,
+                output_attentions=output_attentions,
+            )
+
+            hidden_states = layer_outputs[0]
+            if output_attentions:
+                all_self_attentions = all_self_attentions + (layer_outputs[1],)
+
+        if output_hidden_states:
+            all_hidden_states = all_hidden_states + (hidden_states,)
+
+        return tuple(
+            v
+            for v in [
+                hidden_states,
+                all_hidden_states,
+                all_self_attentions,
+                all_cross_attentions,
+            ]
+            if v is not None
+        )
 
 
 class IRoPEModel(RoFormerModel):
@@ -192,11 +309,13 @@ class IRoPEModel(RoFormerModel):
     config_class = IRoPEConfig
 
     def __init__(self, config):
-        super(RoFormerModel, self).__init__(config)
+        # Skip the parent constructor and use the grandparent to avoid unwanted initializations
+        nn.Module.__init__(self)
         self.config = config
+        
         self.embeddings = RoFormerEmbeddings(config)
         self.encoder = IRoPEEncoder(config)
-
+        
         # Initialize weights
         self.post_init()
     
@@ -208,6 +327,114 @@ class IRoPEModel(RoFormerModel):
         for layer_module in self.encoder.layer:
             pattern.append(layer_module.attention.use_rope)
         return pattern
+        
+    def forward(
+        self,
+        input_ids: Optional[torch.Tensor] = None,
+        attention_mask: Optional[torch.Tensor] = None,
+        token_type_ids: Optional[torch.Tensor] = None,
+        position_ids: Optional[torch.Tensor] = None,
+        head_mask: Optional[torch.Tensor] = None,
+        inputs_embeds: Optional[torch.Tensor] = None,
+        encoder_hidden_states: Optional[torch.Tensor] = None,
+        encoder_attention_mask: Optional[torch.Tensor] = None,
+        past_key_values: Optional[List[torch.FloatTensor]] = None,
+        use_cache: Optional[bool] = None,
+        output_attentions: Optional[bool] = None,
+        output_hidden_states: Optional[bool] = None,
+        return_dict: Optional[bool] = None,
+    ):
+        output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
+        output_hidden_states = (
+            output_hidden_states if output_hidden_states is not None else self.config.output_hidden_states
+        )
+        return_dict = return_dict if return_dict is not None else self.config.use_return_dict
+
+        if input_ids is not None and inputs_embeds is not None:
+            raise ValueError("You cannot specify both input_ids and inputs_embeds at the same time")
+        elif input_ids is not None:
+            input_shape = input_ids.size()
+        elif inputs_embeds is not None:
+            input_shape = inputs_embeds.size()[:-1]
+        else:
+            raise ValueError("You have to specify either input_ids or inputs_embeds")
+
+        batch_size, seq_length = input_shape
+        device = input_ids.device if input_ids is not None else inputs_embeds.device
+
+        # past_key_values_length
+        past_key_values_length = past_key_values[0][0].shape[2] if past_key_values is not None else 0
+
+        if attention_mask is None:
+            attention_mask = torch.ones(((batch_size, seq_length + past_key_values_length)), device=device)
+
+        if token_type_ids is None:
+            if hasattr(self.embeddings, "token_type_ids"):
+                buffered_token_type_ids = self.embeddings.token_type_ids[:, :seq_length]
+                buffered_token_type_ids_expanded = buffered_token_type_ids.expand(batch_size, seq_length)
+                token_type_ids = buffered_token_type_ids_expanded
+            else:
+                token_type_ids = torch.zeros(input_shape, dtype=torch.long, device=device)
+
+        # We can provide a self-attention mask of dimensions [batch_size, from_seq_length, to_seq_length]
+        # ourselves in which case we just need to make it broadcastable to all heads.
+        extended_attention_mask: torch.Tensor = self.get_extended_attention_mask(attention_mask, input_shape, device)
+
+        # If a 2D or 3D attention mask is provided for the cross-attention
+        # we need to make broadcastable to [batch_size, num_heads, seq_length, seq_length]
+        if encoder_hidden_states is not None:
+            if type(encoder_hidden_states) == list:
+                encoder_batch_size, encoder_sequence_length, _ = encoder_hidden_states[0].size()
+            else:
+                encoder_batch_size, encoder_sequence_length, _ = encoder_hidden_states.size()
+            encoder_hidden_shape = (encoder_batch_size, encoder_sequence_length)
+            if encoder_attention_mask is None:
+                encoder_attention_mask = torch.ones(encoder_hidden_shape, device=device)
+            encoder_extended_attention_mask = self.invert_attention_mask(encoder_attention_mask)
+        else:
+            encoder_extended_attention_mask = None
+
+        # Prepare head mask if needed
+        # 1.0 in head_mask indicate we keep the head
+        # attention_probs has shape bsz x n_heads x N x N
+        # input head_mask has shape [num_heads] or [num_hidden_layers x num_heads]
+        # and head_mask is converted to shape [num_hidden_layers x batch x num_heads x seq_length x seq_length]
+        head_mask = self.get_head_mask(head_mask, self.config.num_hidden_layers)
+
+        embedding_output = self.embeddings(
+            input_ids=input_ids,
+            position_ids=position_ids,
+            token_type_ids=token_type_ids,
+            inputs_embeds=inputs_embeds,
+            past_key_values_length=past_key_values_length,
+        )
+        
+        encoder_outputs = self.encoder(
+            embedding_output,
+            attention_mask=extended_attention_mask,
+            head_mask=head_mask,
+            encoder_hidden_states=encoder_hidden_states,
+            encoder_attention_mask=encoder_extended_attention_mask,
+            past_key_values=past_key_values,
+            use_cache=use_cache,
+            output_attentions=output_attentions,
+            output_hidden_states=output_hidden_states,
+            return_dict=return_dict,
+        )
+        sequence_output = encoder_outputs[0]
+        
+        return_dict = self.config.use_return_dict
+        if not return_dict:
+            return (sequence_output,) + encoder_outputs[1:]
+            
+        # Create a proper return object
+        from transformers.modeling_outputs import BaseModelOutputWithPastAndCrossAttentions
+        return BaseModelOutputWithPastAndCrossAttentions(
+            last_hidden_state=sequence_output,
+            hidden_states=encoder_outputs[1] if output_hidden_states else None,
+            attentions=encoder_outputs[2] if output_attentions else None,
+            cross_attentions=encoder_outputs[3] if output_attentions and encoder_hidden_states is not None else None,
+        )
 
 
 def demo_irope_model():
@@ -224,6 +451,7 @@ def demo_irope_model():
         interleaved_pattern="alternating",
         temperature_base=1.0,
         rope_scaling=1.0,
+        max_position_embeddings=4096,  # Support longer positions
     )
     
     # Create model
@@ -238,9 +466,11 @@ def demo_irope_model():
     print(f"- RoPE layers pattern: {model.get_rope_pattern()}")
     
     # Show temperature scaling for different sequence lengths
-    for length in [256, 1024, 4096, 16384, 65536, 262144, 1048576, 10485760]:
-        temp = model.encoder.layer[0].attention.get_temperature_for_length(length)
-        print(f"- Length {length:,}: temperature = {temp:.4f}")
+    if hasattr(model.encoder.layer[0].attention, "get_temperature_for_length"):
+        print("\nTemperature Scaling:")
+        for length in [256, 1024, 4096, 16384, 65536, 262144, 1048576, 10485760]:
+            temp = model.encoder.layer[0].attention.get_temperature_for_length(length)
+            print(f"- Length {length:,}: temperature = {temp:.4f}")
     
     # Test with a small input
     batch_size = 2
@@ -248,16 +478,18 @@ def demo_irope_model():
     input_ids = torch.randint(0, model.config.vocab_size, (batch_size, seq_length))
     attention_mask = torch.ones(batch_size, seq_length)
     
+    print(f"\nTesting with sequence length: {seq_length}")
+    
     # Forward pass
     with torch.no_grad():
         outputs = model(input_ids, attention_mask=attention_mask)
     
-    print(f"\nOutput shape: {outputs.last_hidden_state.shape}")
+    print(f"Output shape: {outputs.last_hidden_state.shape}")
     print("Successfully processed through iRoPE model!")
     
     # Test with a longer sequence
-    print("\nTesting with a longer sequence...")
     long_seq_length = 1024
+    print(f"\nTesting with longer sequence: {long_seq_length}")
     long_input_ids = torch.randint(0, model.config.vocab_size, (1, long_seq_length))
     long_attention_mask = torch.ones(1, long_seq_length)
     
