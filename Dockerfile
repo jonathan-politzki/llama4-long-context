@@ -60,6 +60,56 @@ elif [ "$1" = "compare" ]; then\n\
   python model_comparison.py --char-count ${2:-10000} --llama-only ${3:-""}\n\
 elif [ "$1" = "test" ]; then\n\
   python model_comparison.py --char-count ${2:-10000} --llama-only --test-mode\n\
+elif [ "$1" = "flash-test" ]; then\n\
+  echo "=== Running Progressive Context Tests with Flash Attention 2 ==="\n\
+  \n\
+  # Test small context first\n\
+  echo "Testing with 100,000 characters (~25,000 tokens)..."\n\
+  python model_comparison.py --char-count 100000 --llama-only --test-mode\n\
+  if [ $? -ne 0 ]; then exit 1;\n\
+  fi\n\
+  \n\
+  # Test medium context\n\
+  echo "Testing with 500,000 characters (~125,000 tokens)..."\n\
+  python model_comparison.py --char-count 500000 --llama-only --test-mode\n\
+  if [ $? -ne 0 ]; then exit 1;\n\
+  fi\n\
+  \n\
+  # Test large context\n\
+  echo "Testing with 1,000,000 characters (~250,000 tokens)..."\n\
+  python model_comparison.py --char-count 1000000 --llama-only --test-mode\n\
+  if [ $? -ne 0 ]; then exit 1;\n\
+  fi\n\
+  \n\
+  # Test very large context\n\
+  echo "Testing with 2,000,000 characters (~500,000 tokens)..."\n\
+  python model_comparison.py --char-count 2000000 --llama-only --test-mode\n\
+  if [ $? -ne 0 ]; then exit 1;\n\
+  fi\n\
+  \n\
+  # Test extremely large context\n\
+  echo "Testing with 4,000,000 characters (~1,000,000 tokens)..."\n\
+  python model_comparison.py --char-count 4000000 --llama-only --test-mode\n\
+  if [ $? -ne 0 ]; then exit 1;\n\
+  fi\n\
+  \n\
+  # Test with inference for smaller sizes\n\
+  echo "Testing inference with 100,000 characters..."\n\
+  python model_comparison.py --char-count 100000 --llama-only\n\
+  if [ $? -ne 0 ]; then exit 1;\n\
+  fi\n\
+  \n\
+  echo "Testing inference with 500,000 characters..."\n\
+  python model_comparison.py --char-count 500000 --llama-only\n\
+  if [ $? -ne 0 ]; then exit 1;\n\
+  fi\n\
+  \n\
+  echo "Testing inference with 1,000,000 characters..."\n\
+  python model_comparison.py --char-count 1000000 --llama-only\n\
+  if [ $? -ne 0 ]; then exit 1;\n\
+  fi\n\
+  \n\
+  echo "All tests completed successfully!"\n\
 else\n\
   exec "$@"\n\
 fi' > /app/entrypoint.sh && chmod +x /app/entrypoint.sh
