@@ -113,6 +113,7 @@ def main():
             quantization_config=quantization_config if USE_4BIT_QUANTIZATION else None,
             torch_dtype=torch.bfloat16, # Use bfloat16 for faster computation / less memory
             device_map="auto", # Requires accelerate - distribute model across available GPUs/CPU/RAM
+            max_memory={0: "75GiB", "cpu": "auto"}, # Explicit memory limit per device (GPU 0)
             trust_remote_code=True,
             # attn_implementation="flash_attention_2" # Optional: Requires flash-attn library, might speed up attention
         )
