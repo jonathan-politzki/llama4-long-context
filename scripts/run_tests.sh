@@ -19,13 +19,16 @@ show_help() {
   echo "  docker-run      Run the Docker container"
   echo ""
   echo "Options:"
-  echo "  --size SIZE     Size in characters (default varies by test)"
-  echo "  --position POS  Position for the needle (0-100, default: 50)"
+  echo "  --size SIZE        Size in characters (default varies by test)"
+  echo "  --position POS     Position of the needle (0-100, default: 50)"
+  echo "  --needle TEXT      Custom needle text to insert in the document"
+  echo "  --question TEXT    Custom question to ask about the needle"
   echo ""
   echo "Examples:"
   echo "  $0 llama-small"
   echo "  $0 gemini --size 100000"
   echo "  $0 gemini-scale --max 1600000"
+  echo "  $0 gemini --size 1600000 --needle 'Secret code is X42Z' --question 'What is the secret code?'"
   echo ""
 }
 
@@ -81,7 +84,6 @@ run_gemini() {
   question=""
   
   # Parse command line arguments
-  shift
   while [ $# -gt 0 ]; do
     case "$1" in
       --size)
@@ -111,10 +113,10 @@ run_gemini() {
   # Build command with optional parameters
   cmd="python3 models/gemini/gemini_test.py --char-count $size --position $pos"
   if [ -n "$needle" ]; then
-    cmd="$cmd --needle \"$needle\""
+    cmd="$cmd --needle '$needle'"
   fi
   if [ -n "$question" ]; then
-    cmd="$cmd --question \"$question\""
+    cmd="$cmd --question '$question'"
   fi
   
   # Run the command
@@ -161,7 +163,8 @@ case "$1" in
     run_llama_full "$2"
     ;;
   "gemini")
-    run_gemini "$2" "$3" "$4" "$5"
+    shift
+    run_gemini "$@"
     ;;
   "gemini-scale")
     max=8000000
