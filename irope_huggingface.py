@@ -158,14 +158,28 @@ class IRoPESelfAttention(RoFormerSelfAttention):
         # Apply rotary embeddings
         sin = sin[:, :, :x.shape[2], :]
         cos = cos[:, :, :x.shape[2], :]
-        x_embed = (x * cos) + (self._rotate_half(x) * sin)
-        return x_embed
         
-    def _rotate_half(self, x):
-        """Rotates half the hidden dims of the input."""
-        x1 = x[..., : x.shape[-1] // 2]
-        x2 = x[..., x.shape[-1] // 2 :]
-        return torch.cat((-x2, x1), dim=-1)
+        # Split the input tensor on the hidden dimension
+        x_shape = x.shape
+        half_dim = x.shape[-1] // 2
+        
+        # Get the first half and second half of the hidden dimension
+        x1 = x[..., :half_dim]
+        x2 = x[..., half_dim:]
+        
+        # Repeat the sinusoidal embeddings to match the hidden dimension if needed
+        if sin.shape[-1] != half_dim:
+            repeat_factor = half_dim // sin.shape[-1]
+            sin = sin.repeat(1, 1, 1, repeat_factor)
+            cos = cos.repeat(1, 1, 1, repeat_factor)
+            
+        # Apply the rotary embeddings
+        rotated_x = torch.cat([
+            x1 * cos - x2 * sin,
+            x2 * cos + x1 * sin
+        ], dim=-1)
+        
+        return rotated_x
 
 
 class IRoPELayer(RoFormerLayer):
