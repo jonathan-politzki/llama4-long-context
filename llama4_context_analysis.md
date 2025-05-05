@@ -65,6 +65,33 @@ This operation requires materializing the full attention matrix between all toke
 - For an 8K token window: 8K × 8K × 32/64 bits = ~256-512MB per attention layer
 - With 48 layers and 16 experts, this quickly exceeds available memory on a single GPU
 
+## KV Cache Memory Requirements (Independent Analysis)
+
+Our findings align with independent research by Sander Ali Khowaja (April 2025), who analyzed the theoretical memory requirements for Llama 4's 10M token context window:
+
+- For a 10M token context, a single attention layer requires ~320GB of KV cache memory
+- With ~100 attention layers in a typical LLM architecture, the total KV cache storage requirement would be approximately 32TB
+- This calculation only considers the KV cache, not including model parameters, activations, and other operational overhead
+
+This independent analysis confirms that standard attention mechanisms would require hardware far beyond our 4× H100 setup (320GB total) to handle the claimed 10M token context window.
+
+## Meta's iRoPE Architecture for Llama 4
+
+According to Meta's official Llama 4 announcement, Llama 4 Scout achieves its 10M token context window through several architectural innovations:
+
+1. **Interleaved Attention Layers**: Some attention layers operate without positional embeddings, allowing for unbounded context modeling.
+
+2. **iRoPE Architecture**: Meta uses an architecture they call "iRoPE", where:
+   - "i" stands for "interleaved" attention layers
+   - "RoPE" refers to Rotary Position Embeddings used in most (but not all) layers
+   - This combination provides the foundation for "infinite" context length support
+
+3. **Temperature Scaling**: They apply "inference time temperature scaling of attention" to enhance length generalization.
+
+4. **Specialized Training**: Llama 4 Scout was pre-trained and post-trained with a 256K context length using specialized long-context datasets, which enables length generalization beyond the training context size.
+
+This specialized architecture is not readily accessible in the publicly available implementation we tested. Our experiments used the standard loading and inference procedure available through the Hugging Face transformers library.
+
 ## System Requirements for Long Context
 
 Based on our findings, these are the requirements for different context sizes:
@@ -96,6 +123,29 @@ Several strategies can extend context capabilities:
 4. **Engineering Solutions**:
    - **GQA (Grouped-Query Attention)**: Reduce KV cache size through query grouping
    - **Streaming Inference**: Process the context in overlapping chunks
+   - **iRoPE**: Meta's interleaved approach with some layers not using positional encoding
+
+## Implementing iRoPE Architecture
+
+Based on Meta's description, implementing the iRoPE architecture would require:
+
+1. **Interleaved Attention Layers**:
+   - Modify the transformer architecture to alternate between layers with and without positional embeddings
+   - Layers without positional information can handle arbitrary context lengths
+
+2. **Modified Rotary Position Embeddings**:
+   - Keep RoPE in most layers but potentially with modified frequency scaling
+   - Implement specialized RoPE layers that better handle extrapolation beyond training context lengths
+
+3. **Attention Temperature Scaling**:
+   - Add inference-time scaling to the attention scores before softmax
+   - This helps control the "temperature" of attention distributions over very long contexts
+
+4. **Advanced Model Parallelism**:
+   - Implement sophisticated tensor and pipeline parallelism to distribute the attention computation
+   - Use specialized memory management techniques for the KV cache
+
+Implementation of these techniques would require significant modifications to the PyTorch or Hugging Face transformers codebase and substantial GPU resources for testing.
 
 ## Practical Recommendations
 
@@ -124,10 +174,10 @@ To build systems supporting extremely long contexts:
 1. **Phase 1 (Immediate)**: Implement Flash Attention 2 with proper CUDA dev tools
 2. **Phase 2 (Short-term)**: Add LLMLingua context compression preprocessing
 3. **Phase 3 (Medium-term)**: Develop distributed inference across multiple machines
-4. **Phase 4 (Long-term)**: Explore specialized model architectures for efficient streaming inference
+4. **Phase 4 (Long-term)**: Explore specialized model architectures like iRoPE for efficient streaming inference
 
 ## Conclusion
 
-Our experiments confirm Llama 4 Scout can successfully load very large contexts across multiple GPUs, but actual inference remains challenging due to attention computation memory requirements. The path to true 10M token context requires a combination of hardware scaling, context compression, and algorithmic improvements in attention mechanisms.
+Our experiments confirm Llama 4 Scout can successfully load very large contexts across multiple GPUs, but actual inference remains challenging due to attention computation memory requirements. The path to true 10M token context requires specialized architectures like iRoPE combined with hardware scaling, context compression, and algorithmic improvements in attention mechanisms.
 
-For practical applications today, contexts of 100K-250K tokens are achievable with proper hardware and optimization techniques. 
+For practical applications today, contexts of 100K-250K tokens are achievable with proper hardware and optimization techniques. Reaching multi-million token contexts will require implementing specialized techniques like those described in Meta's iRoPE architecture. 
