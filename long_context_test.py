@@ -9,7 +9,7 @@ import time # Add time import
 print(f"--- Script executed at: {time.time()} ---") # Add this line
 
 # --- Configuration ---
-TARGET_CHAR_COUNT = 1_000_000 # Start smaller (e.g., 1M chars ~ 250k tokens), increase later to ~40M chars for 10M tokens
+TARGET_CHAR_COUNT = 10_000 # ~2.5k tokens # Start smaller (e.g., 1M chars ~ 250k tokens), increase later to ~40M chars for 10M tokens
 NEEDLE = "The secret passphrase for the blueberry muffin recipe is 'QuantumQuasar'."
 QUESTION = "What is the secret passphrase for the blueberry muffin recipe?"
 
