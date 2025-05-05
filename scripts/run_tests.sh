@@ -75,10 +75,54 @@ run_llama_full() {
 
 # Run a Gemini test
 run_gemini() {
-  size=${1:-100000}
-  pos=${2:-50}
+  size=100000
+  pos=50
+  needle=""
+  question=""
+  
+  # Parse command line arguments
+  shift
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --size)
+        size="$2"
+        shift 2
+        ;;
+      --position)
+        pos="$2"
+        shift 2
+        ;;
+      --needle)
+        needle="$2"
+        shift 2
+        ;;
+      --question)
+        question="$2"
+        shift 2
+        ;;
+      *)
+        echo "Unknown option: $1"
+        show_help
+        exit 1
+        ;;
+    esac
+  done
+  
+  # Build command with optional parameters
+  cmd="python3 models/gemini/gemini_test.py --char-count $size --position $pos"
+  if [ -n "$needle" ]; then
+    cmd="$cmd --needle \"$needle\""
+  fi
+  if [ -n "$question" ]; then
+    cmd="$cmd --question \"$question\""
+  fi
+  
+  # Run the command
   echo "Running Gemini test with size $size and position $pos%..."
-  python3 models/gemini/gemini_test.py --char-count "$size" --position "$pos"
+  if [ -n "$needle" ]; then
+    echo "Custom needle: $needle"
+  fi
+  eval $cmd
 }
 
 # Run a Gemini scaling test
@@ -117,30 +161,7 @@ case "$1" in
     run_llama_full "$2"
     ;;
   "gemini")
-    size=100000
-    pos=50
-    
-    # Parse command line arguments
-    shift
-    while [ $# -gt 0 ]; do
-      case "$1" in
-        --size)
-          size="$2"
-          shift 2
-          ;;
-        --position)
-          pos="$2"
-          shift 2
-          ;;
-        *)
-          echo "Unknown option: $1"
-          show_help
-          exit 1
-          ;;
-      esac
-    done
-    
-    run_gemini "$size" "$pos"
+    run_gemini "$2" "$3" "$4" "$5"
     ;;
   "gemini-scale")
     max=8000000
