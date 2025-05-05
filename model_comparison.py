@@ -138,46 +138,35 @@ def clear_gpu_memory():
             torch.cuda.reset_accumulated_memory_stats(i)
     print("GPU memory cleared")
 
-def load_llama_with_extreme_memory_savings():
-    """Load Llama model with extreme memory saving techniques."""
-    print("Loading Llama model with extreme memory saving techniques")
+def load_llama_with_multi_gpu():
+    """Load Llama model distributed across multiple GPUs."""
+    print("Loading Llama model with multi-GPU support")
     
-    # Configure 4-bit quantization with double quantization
+    # Configure quantization
     quantization_config = BitsAndBytesConfig(
         load_in_4bit=True,
         bnb_4bit_quant_type="nf4",
         bnb_4bit_compute_dtype=torch.bfloat16,
         bnb_4bit_use_double_quant=True,
     )
-
-    # Create explicit device map to heavily offload to CPU
-    device_map = {
-        "model.embed_tokens": 0,  # Keep embeddings on GPU
-        "model.norm": 0,          # Keep final normalization on GPU
-        "lm_head": 0,             # Keep language model head on GPU
-    }
     
-    # All other layers will automatically be offloaded to CPU
-    
-    # Load with minimal memory footprint
+    # Load with distributed setup
     model = AutoModelForCausalLM.from_pretrained(
         LLAMA_MODEL_ID,
         quantization_config=quantization_config,
         torch_dtype=torch.bfloat16,
-        device_map=device_map if ENABLE_CPU_OFFLOAD else "auto",
+        device_map="auto",  # Let accelerate distribute across available GPUs
         offload_folder=OFFLOAD_FOLDER if ENABLE_CPU_OFFLOAD else None,
         offload_state_dict=ENABLE_CPU_OFFLOAD,
         low_cpu_mem_usage=True,
-        max_memory={0: MAX_GPU_MEMORY, "cpu": MAX_CPU_MEMORY},
         trust_remote_code=True,
     )
     
-    # Apply model-specific optimizations
-    if hasattr(model, "config") and hasattr(model.config, "pretraining_tp"):
-        model.config.pretraining_tp = 1  # Ensure tensor parallelism is disabled
-    
-    if hasattr(model, "gradient_checkpointing_enable"):
-        model.gradient_checkpointing_enable()
+    # Print distributed device map
+    if hasattr(model, "hf_device_map"):
+        print("\nModel distribution across devices:")
+        for key, device in model.hf_device_map.items():
+            print(f"  {key}: {device}")
     
     return model
 
@@ -286,7 +275,7 @@ def test_llama(prompt, needle, args):
         
         # Load model with advanced memory management
         print(f"Loading model {LLAMA_MODEL_ID}...")
-        model = load_llama_with_extreme_memory_savings()
+        model = load_llama_with_multi_gpu()
         
         # Process in chunks
         print("Processing long context...")

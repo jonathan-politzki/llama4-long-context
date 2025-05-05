@@ -12,6 +12,7 @@ services:
     environment:
       # Set environment variables here
       - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - HF_TOKEN=${HF_TOKEN}
       - PYTORCH_CUDA_ALLOC_CONF=max_split_size_mb:128,expandable_segments:True
     deploy:
       resources:

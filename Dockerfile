@@ -22,15 +22,17 @@ RUN wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh -
 # Create working directory
 WORKDIR /app
 
-# Install pip dependencies
+# Copy requirements
 COPY requirements.txt .
+
+# Install pip dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy project files
-COPY long_context_test.py model_comparison.py setup_and_run.sh README.md ./
+COPY *.py *.sh README.md ./
 
 # Make scripts executable
-RUN chmod +x setup_and_run.sh
+RUN chmod +x *.sh
 
 # Create directories needed by the application
 RUN mkdir -p /app/offload_folder /app/comparison_results
@@ -38,16 +40,25 @@ RUN mkdir -p /app/offload_folder /app/comparison_results
 # Set environment variable for HF cache
 ENV HF_HOME=/app/.cache
 
-# Create a wrapper script to execute with different commands
+# Create entrypoint script
 RUN echo '#!/bin/bash\n\
+# Login to HuggingFace if token is provided\n\
+if [ -n "$HF_TOKEN" ]; then\n\
+  echo "Logging in to HuggingFace..."\n\
+  huggingface-cli login --token $HF_TOKEN --add-to-git-credential\n\
+fi\n\
+\n\
+# Run command\n\
 if [ "$1" = "setup" ]; then\n\
-    ./setup_and_run.sh\n\
+  ./setup_and_run.sh\n\
 elif [ "$1" = "llama" ]; then\n\
-    python long_context_test.py\n\
+  python long_context_test.py\n\
 elif [ "$1" = "compare" ]; then\n\
-    python model_comparison.py --char-count ${2:-10000} --llama-only ${3:---test-mode}\n\
+  python model_comparison.py --char-count ${2:-10000} --llama-only ${3:-""}\n\
+elif [ "$1" = "test" ]; then\n\
+  python model_comparison.py --char-count ${2:-10000} --llama-only --test-mode\n\
 else\n\
-    exec "$@"\n\
+  exec "$@"\n\
 fi' > /app/entrypoint.sh && chmod +x /app/entrypoint.sh
 
 # Set entrypoint
