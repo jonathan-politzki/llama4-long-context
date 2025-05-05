@@ -5,6 +5,8 @@ import torch # Added for dtype and device management
 from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig # Added Hugging Face imports
 import gc # Garbage collection
 import time # Add time import
+import os # For environment variables
+import psutil # For memory monitoring
 
 print(f"--- Script executed at: {time.time()} ---") # Add this line
 
@@ -14,12 +16,38 @@ NEEDLE = "The secret passphrase for the blueberry muffin recipe is 'QuantumQuasa
 QUESTION = "What is the secret passphrase for the blueberry muffin recipe?"
 
 # --- Hugging Face Model Configuration ---
-# !!! IMPORTANT: Replace with the actual model ID when released !!!
 MODEL_ID = "meta-llama/Llama-4-Scout-17B-16E-Instruct"  # Official ID from Hugging Face
 
 # Configuration for 4-bit quantization (requires bitsandbytes)
 USE_4BIT_QUANTIZATION = True # Set to False if not using quantization or hardware doesn't support it well
+
+# Advanced memory management options
+OFFLOAD_FOLDER = "./offload_folder"  # Where to offload model parts if needed
+ENABLE_CPU_OFFLOAD = True  # Enable CPU offloading for layers that don't fit in GPU
+MAX_GPU_MEMORY = "70GiB"   # Leave some headroom for the KV cache
+
+# --- Environment settings ---
+os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "max_split_size_mb:128"  # Help prevent fragmentation
+
 # --- ---
+
+def print_system_info():
+    """Print system information for debugging purposes."""
+    print("\n--- System Information ---")
+    if torch.cuda.is_available():
+        print(f"CUDA Available: Yes")
+        print(f"CUDA Version: {torch.version.cuda}")
+        print(f"GPU Device: {torch.cuda.get_device_name(0)}")
+        print(f"GPU Memory: {torch.cuda.get_device_properties(0).total_memory / (1024**3):.2f} GB")
+        print(f"Current GPU Memory Usage: {torch.cuda.memory_allocated(0) / (1024**3):.2f} GB")
+    else:
+        print("CUDA Available: No")
+    
+    vm = psutil.virtual_memory()
+    print(f"Total System RAM: {vm.total / (1024**3):.2f} GB")
+    print(f"Available System RAM: {vm.available / (1024**3):.2f} GB")
+    print(f"CPU Count: {psutil.cpu_count(logical=False)} physical, {psutil.cpu_count()} logical")
+    print("---------------------------")
 
 def generate_filler_text(char_count):
     """Generates repetitive filler text to approximate the haystack size."""
@@ -57,6 +85,7 @@ Answer:"""
 
 def main():
     print("--- Starting Long Context Test Prompt Generation ---")
+    print_system_info()
 
     # 1. Generate Haystack
     haystack = generate_filler_text(TARGET_CHAR_COUNT)
@@ -78,6 +107,10 @@ def main():
     gc.collect()
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
+
+    # Create offload folder if it doesn't exist
+    if ENABLE_CPU_OFFLOAD and not os.path.exists(OFFLOAD_FOLDER):
+        os.makedirs(OFFLOAD_FOLDER)
 
     # --- Load Tokenizer and Model (Requires Appropriate Hardware: H100 GPU recommended) ---
     print("\n--- Loading Tokenizer and Model ---")
@@ -108,23 +141,36 @@ def main():
 
         print(f"DEBUG: Attempting to load model with MODEL_ID = {MODEL_ID}")
         print(f"Loading model {MODEL_ID}...")
+        
+        # Create a device map specifically offloading some layers to CPU
+        from accelerate import infer_auto_device_map
+        from transformers import AutoConfig
+        
+        config = AutoConfig.from_pretrained(MODEL_ID, trust_remote_code=True)
+        
+        # Try to load the model with more advanced memory management
         model = AutoModelForCausalLM.from_pretrained(
             MODEL_ID,
             quantization_config=quantization_config if USE_4BIT_QUANTIZATION else None,
             torch_dtype=torch.bfloat16, # Use bfloat16 for faster computation / less memory
-            device_map="auto", # Requires accelerate - distribute model across available GPUs/CPU/RAM
-            max_memory={0: "75GiB"}, # Limit memory only for GPU 0
+            device_map="auto", # Let accelerate distribute the model
+            offload_folder=OFFLOAD_FOLDER if ENABLE_CPU_OFFLOAD else None,
+            offload_state_dict=ENABLE_CPU_OFFLOAD, # Offload state dict to CPU if needed
+            low_cpu_mem_usage=True,  # More efficient memory usage during loading
+            max_memory={0: MAX_GPU_MEMORY, "cpu": "64GiB"}, # Limit GPU memory, allow CPU offloading
             trust_remote_code=True,
-            # attn_implementation="flash_attention_2" # Optional: Requires flash-attn library, might speed up attention
         )
         print("Model loaded.")
 
         # --- Tokenize Prompt and Run Inference ---
         print("\n--- Tokenizing Prompt ---")
         # Ensure prompt fits tokenizer context length if applicable (though Scout aims for 10M)
-        inputs = tokenizer(final_prompt, return_tensors="pt", padding=True, truncation=False).to(model.device)
+        inputs = tokenizer(final_prompt, return_tensors="pt", padding=True, truncation=False).to("cuda:0")
         print(f"Input token count: {inputs['input_ids'].shape[1]}")
 
+        # Print memory usage after tokenization
+        if torch.cuda.is_available():
+            print(f"GPU Memory Usage after tokenization: {torch.cuda.memory_allocated(0) / (1024**3):.2f} GB")
 
         print("\n--- Running Inference (This will take a long time!) ---")
         # Generate response
@@ -162,6 +208,9 @@ def main():
         print("\n❌ Error: CUDA Out of Memory!")
         print("The model and/or the KV cache for the 10M context likely exceeded available GPU VRAM.")
         print("Ensure you are running on an H100 GPU with sufficient VRAM and system RAM.")
+        print("Try reducing TARGET_CHAR_COUNT or using a machine with more memory.")
+        if torch.cuda.is_available():
+            print(f"Current GPU Memory Usage: {torch.cuda.memory_allocated(0) / (1024**3):.2f} GB")
     except Exception as e:
         print(f"\n❌ An unexpected error occurred: {e}")
         import traceback
@@ -169,24 +218,21 @@ def main():
 
     finally:
         # Clean up GPU memory
-        del model
-        del tokenizer
-        del inputs
-        del outputs
+        if 'model' in locals() and model is not None:
+            del model
+        if 'tokenizer' in locals() and tokenizer is not None:
+            del tokenizer
+        if 'inputs' in locals() and 'inputs' in vars():
+            del inputs
+        if 'outputs' in locals() and 'outputs' in vars():
+            del outputs
         gc.collect()
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
         print("\n--- Cleanup Complete ---")
 
 
-    # 4. Placeholder for LLM Interaction (Old section removed, replaced by above)
-    # print("\n--- Prompt Ready ---")
-    # print(f"Prompt length (approx characters): {len(final_prompt):,}")
-    # print(final_prompt) # Uncomment carefully - this will be HUGE!
-
     print("\n--- Next Steps (If running locally/on instance) ---")
-    # print("1. Copy the generated prompt (or save it to a file).") # No longer needed if running here
-    # print("2. Send this prompt to the Llama 4 Scout model endpoint/API.") # Now handled in script
     print("1. Ensure you have replaced the placeholder MODEL_ID with the correct one.")
     print("2. Ensure this script runs on a machine with the required hardware (H100 GPU).")
     print("3. Install all dependencies from requirements.txt.")
@@ -195,18 +241,5 @@ def main():
     print(f"6. Evaluate the model's response printed above.")
 
 
-    # Example of how you might save the prompt to a file (Optional now)
-    # try:
-    #     output_filename = "long_prompt.txt"
-    #     with open(output_filename, "w", encoding="utf-8") as f:
-    #         f.write(final_prompt)
-    #     print(f"\nPrompt saved to '{output_filename}'. Size: {len(final_prompt) / (1024*1024):.2f} MB")
-    # except Exception as e:
-    #     print(f"\nError saving prompt to file: {e}")
-    #     print("You might need to handle the large prompt string directly.")
-
-
 if __name__ == "__main__":
-    # Increase recursion depth for potentially deep structures if needed, though less likely here
-    # sys.setrecursionlimit(20000)
     main() 

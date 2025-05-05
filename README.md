@@ -1,6 +1,6 @@
 # Llama 4 Scout - 10M Token Context Window Evaluation
 
-**Version:** 0.1.0
+**Version:** 0.2.0
 
 ## 1. Project Goal & Significance
 
@@ -40,8 +40,12 @@ The core logic resides in the `long_context_test.py` script, which performs the 
 ```
 .
 ├── .venv/                  # Python virtual environment (if created locally)
-├── long_context_test.py    # Main script for generation, inference, and evaluation
+├── long_context_test.py    # Main script for Llama 4 Scout evaluation
+├── model_comparison.py     # Script to compare Llama 4 vs Gemini
+├── setup_and_run.sh        # Helper script to set up and run the comparison
 ├── requirements.txt        # Python dependencies
+├── offload_folder/         # Created at runtime for model offloading
+├── comparison_results/     # Created at runtime to store comparison results
 └── README.md               # This documentation file
 ```
 
@@ -52,8 +56,10 @@ Key parameters can be adjusted within `long_context_test.py`:
 *   `TARGET_CHAR_COUNT` (int): The approximate number of characters to generate for the haystack. Aim for ~4 characters per token (e.g., `40_000_000` for 10M tokens). **Start small (e.g., `10_000`) to test the pipeline before attempting massive contexts.**
 *   `NEEDLE` (str): The specific piece of information to hide in the haystack.
 *   `QUESTION` (str): The question posed to the LLM, designed to be answerable only by retrieving the `NEEDLE`.
-*   `MODEL_ID` (str): **Crucial.** The Hugging Face Hub identifier for the model to test. **Must be updated from the placeholder (`"meta-llama/Llama-4-Scout-10M-hf"`) to the actual released ID.**
+*   `MODEL_ID` (str): The Hugging Face Hub identifier for the model.
 *   `USE_4BIT_QUANTIZATION` (bool): Set to `True` to enable 4-bit loading via `bitsandbytes` (requires compatible hardware/OS and the library installed). Set to `False` to load in default precision (typically `bfloat16` as specified in the script), requiring significantly more VRAM.
+*   `ENABLE_CPU_OFFLOAD` (bool): Enable offloading model layers to CPU when needed.
+*   `MAX_GPU_MEMORY` (str): Limit GPU memory usage to this amount.
 *   `Generation Parameters` (within `model.generate` call): Parameters like `max_new_tokens`, `do_sample`, `temperature`, etc., can be tuned to influence the model's output generation behavior.
 
 ## 5. Setup Instructions
@@ -76,55 +82,103 @@ Key parameters can be adjusted within `long_context_test.py`:
     git clone <your-repo-url>
     cd <your-repo-directory>
     ```
-2.  **Create & Activate Virtual Environment:**
+2.  **Use the Automated Setup Script:**
+    ```bash
+    ./setup_and_run.sh
+    ```
+    This script will:
+    - Create a Python virtual environment
+    - Install all required dependencies
+    - Run the model comparison with your chosen settings
+    
+    Alternatively, follow the manual setup:
+
+3.  **Create & Activate Virtual Environment:**
     ```bash
     python3 -m venv .venv
     source .venv/bin/activate # Linux/macOS
     # OR: .venv\Scripts\activate # Windows
     ```
-3.  **Install Dependencies:**
+4.  **Install Dependencies:**
     ```bash
     # Upgrade pip (optional but recommended)
     pip install --upgrade pip
     # Install requirements
     pip install -r requirements.txt
     ```
-    *   **Note on `torch`:** `requirements.txt` lists `torch` generically. `pip` will attempt to install a compatible version. For GPU acceleration, you might need to install a specific version matching your CUDA toolkit *before* running `pip install -r requirements.txt`. Refer to the [PyTorch website](https://pytorch.org/get-started/locally/) for specific commands.
-    *   **Note on `bitsandbytes`:** This library enables 4-bit quantization. It is commented out by default in `requirements.txt` as pre-compiled wheels are often unavailable for macOS or Windows. To enable it:
-        *   Uncomment the line in `requirements.txt`.
-        *   Ensure you are on a **Linux system with an NVIDIA GPU and compatible CUDA setup**.
-        *   Run `pip install -r requirements.txt` again.
-        *   Set `USE_4BIT_QUANTIZATION = True` in the script.
-4.  **Hugging Face Login:**
+    
+5.  **Hugging Face Login:**
     Authenticate to download models:
     ```bash
     huggingface-cli login
     ```
     Enter your access token when prompted.
 
-## 6. Running the Test
+## 6. Running the Tests
 
-1.  **Verify Configuration:** Double-check `MODEL_ID`, `TARGET_CHAR_COUNT`, and `USE_4BIT_QUANTIZATION` in `long_context_test.py`.
-2.  **Ensure Environment:** Confirm you are on suitable hardware and the virtual environment is activated.
-3.  **Execute Script:**
-    ```bash
-    python long_context_test.py
-    ```
-4.  **Monitor Output:**
-    *   The script provides verbose output about generation, model loading, tokenization, inference, and evaluation.
-    *   **Expect extremely long run times**, potentially hours, for multi-million token contexts, even on H100 hardware.
-    *   Watch for CUDA Out-of-Memory (OOM) errors or other exceptions.
-5.  **Analyze Results:** Review the final printed model response and the "✅ Success" or "❌ Failure" evaluation message.
+### 6.1 Llama 4 Scout Long Context Test
 
-## 7. Evaluation Method
+To run the original Llama 4 Scout 10M context test:
 
-The current evaluation is rudimentary:
+```bash
+python long_context_test.py
+```
 
-*   It performs a case-insensitive check for the exact `NEEDLE` string within the generated `response_text`.
+### 6.2 Llama 4 vs Gemini Comparison
 
-This confirms basic retrieval but doesn't assess the *quality* or *contextual appropriateness* of the response beyond finding the needle.
+The comparison script allows you to benchmark Llama 4 Scout against Google's Gemini model:
 
-## 8. Troubleshooting
+```bash
+# Set your Gemini API key
+export GEMINI_API_KEY="your-api-key-here"
+
+# Run the comparison with default settings (2M tokens)
+python model_comparison.py
+
+# Or specify custom parameters
+python model_comparison.py --char-count 4000000 --llama-only
+python model_comparison.py --char-count 8000000 --gemini-only --gemini-api-key "your-key"
+```
+
+For convenience, you can use the automated script:
+
+```bash
+./setup_and_run.sh
+```
+
+This will guide you through the setup and running process interactively.
+
+## 7. Memory Optimization
+
+To address memory constraints, especially when running on cloud GPUs like H100, the scripts implement several optimizations:
+
+- **4-bit Quantization**: Reduces model weight memory by loading in 4-bit precision using bitsandbytes
+- **CPU Offloading**: Automatically offloads less frequently used model layers to system RAM
+- **Memory Limits**: Sets explicit memory limits to avoid OOM errors
+- **Resource Monitoring**: Tracks system and GPU resources throughout execution
+- **Memory Management**: Properly frees resources after use to prevent memory leaks
+
+For particularly large contexts (approaching 10M tokens), you may need:
+- A multi-GPU setup with 2 or more H100 GPUs
+- A system with 128GB+ of RAM for CPU offloading
+- Appropriate CUDA configuration to prevent memory fragmentation
+
+## 8. Model Comparison
+
+The `model_comparison.py` script enables side-by-side evaluation of:
+
+1. **Llama 4 Scout**: Using local inference with 4-bit quantization for 2M token contexts
+2. **Gemini 1.5 Pro**: Using Google's API for 2M token contexts
+
+The script records:
+- Success/failure in retrieving the needle
+- Runtime performance
+- Memory usage
+- Response quality
+
+Results are saved to JSON files in the `comparison_results/` directory for later analysis.
+
+## 9. Troubleshooting
 
 *   **`CUDA out of memory`:**
     *   The most common issue with large contexts.
@@ -143,32 +197,34 @@ This confirms basic retrieval but doesn't assess the *quality* or *contextual ap
 *   **Dependency Conflicts:**
     *   Ensure a clean virtual environment.
     *   Check compatibility between `torch`, `transformers`, `accelerate`, `bitsandbytes`, and your CUDA version.
+*   **Gemini API Errors:**
+    *   Verify API key is correct
+    *   Check API rate limits and quotas
+    *   For very large contexts, consider increasing request timeouts
 
-## 9. Limitations
+## 10. Limitations
 
 *   **Simplistic Haystack:** Uses basic text repetition, which may not accurately reflect the complexity of real-world documents.
 *   **Fixed Needle Placement:** Inserts the needle randomly, but doesn't systematically test different positions (e.g., start, middle, end) which can affect performance.
 *   **Basic Evaluation:** Only checks for the presence of the needle string.
 *   **Hardware Dependency:** Requires high-end, specific GPU hardware, limiting accessibility.
 *   **Model Availability:** Relies on the target LLM being released and accessible via Hugging Face Hub.
-*   **Static Configuration:** Parameters are hardcoded; adding command-line arguments would increase flexibility.
 
-## 10. Future Work & Potential Improvements
+## 11. Future Work & Potential Improvements
 
 *   **Advanced Haystack Generation:** Incorporate more diverse and realistic text sources (e.g., Wikipedia dumps, ArXiv papers, code repositories).
 *   **Systematic Needle Placement:** Add options to place the needle at specific relative positions within the context (e.g., 0%, 25%, 50%, 75%, 100%).
 *   **Multiple Needles:** Test the model's ability to retrieve multiple distinct pieces of information.
 *   **Sophisticated Evaluation:** Implement metrics beyond simple string matching (e.g., ROUGE scores if the task is summarization-like, exact match on specific extracted answers, semantic similarity checks).
-*   **Command-Line Interface:** Use `argparse` to allow configuration via command-line arguments.
-*   **API Integration:** Add adapters to run tests against commercial LLM APIs (e.g., Anthropic, OpenAI, Google AI, Groq) that might support long contexts, allowing comparison.
+*   **API Integration:** Add adapters to run tests against more commercial LLM APIs that might support long contexts, allowing comparison.
 *   **Performance Benchmarking:** Measure and log VRAM usage, inference latency, and token throughput.
 *   **Context Length Sweeping:** Automate running tests across a range of `TARGET_CHAR_COUNT` values to plot performance vs. context length.
 *   **Visualization:** Generate plots showing success rate vs. context length or needle position.
 
-## 11. Contributing
+## 12. Contributing
 
 (Placeholder - detail contribution guidelines if applicable, e.g., pull requests, issue reporting).
 
-## 12. License
+## 13. License
 
 (Placeholder - e.g., MIT License, Apache 2.0).

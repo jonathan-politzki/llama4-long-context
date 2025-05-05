@@ -1,12 +1,19 @@
 # Core ML Framework
 # Specify correct version based on your CUDA version if using GPU
 # e.g., torch==2.x.x+cu118 or torch==2.x.x+cu121
-torch
+torch>=2.2.0
 
 # Hugging Face Libraries
 transformers>=4.40.0 # Use a recent version
 accelerate>=0.30.0   # Needed for device_map="auto"
-bitsandbytes>=0.43.0 # Needed for 4-bit quantization (Commented out for macOS compatibility)
+bitsandbytes>=0.43.0 # Needed for 4-bit quantization
+triton            # Required for some optimizations
+
+# System monitoring
+psutil>=5.9.0     # For memory monitoring
+
+# Gemini API
+google-generativeai>=0.3.1  # For Gemini API access
 
 # Optional: For potential speedups (requires separate installation & setup)
 # flash-attn>=2.5.8 # Uncomment if using attn_implementation="flash_attention_2"
