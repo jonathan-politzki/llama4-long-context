@@ -1,0 +1,31 @@
+# Git files
+.git/
+.gitignore
+
+# Python cache files
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.env
+.venv
+venv/
+ENV/
+
+# Data directories that will be mounted at runtime
+comparison_results/
+offload_folder/
+hf_cache/
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Log files
+*.log
+
+# OS specific
+.DS_Store 

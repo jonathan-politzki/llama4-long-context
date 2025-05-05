@@ -1,6 +1,6 @@
 # Llama 4 Scout - 10M Token Context Window Evaluation
 
-**Version:** 0.2.0
+**Version:** 0.3.0
 
 ## 1. Project Goal & Significance
 
@@ -43,39 +43,76 @@ The core logic resides in the `long_context_test.py` script, which performs the 
 ├── long_context_test.py    # Main script for Llama 4 Scout evaluation
 ├── model_comparison.py     # Script to compare Llama 4 vs Gemini
 ├── setup_and_run.sh        # Helper script to set up and run the comparison
+├── Dockerfile              # Docker container definition
+├── docker-compose.yml      # Docker Compose configuration
+├── run-docker.sh           # Helper script to run Docker commands
 ├── requirements.txt        # Python dependencies
 ├── offload_folder/         # Created at runtime for model offloading
 ├── comparison_results/     # Created at runtime to store comparison results
+├── hf_cache/               # HuggingFace cache directory
 └── README.md               # This documentation file
 ```
 
-## 4. Configuration
+## 4. Dockerized Deployment
 
-Key parameters can be adjusted within `long_context_test.py`:
+### 4.1 Using Docker (Recommended)
 
-*   `TARGET_CHAR_COUNT` (int): The approximate number of characters to generate for the haystack. Aim for ~4 characters per token (e.g., `40_000_000` for 10M tokens). **Start small (e.g., `10_000`) to test the pipeline before attempting massive contexts.**
-*   `NEEDLE` (str): The specific piece of information to hide in the haystack.
-*   `QUESTION` (str): The question posed to the LLM, designed to be answerable only by retrieving the `NEEDLE`.
-*   `MODEL_ID` (str): The Hugging Face Hub identifier for the model.
-*   `USE_4BIT_QUANTIZATION` (bool): Set to `True` to enable 4-bit loading via `bitsandbytes` (requires compatible hardware/OS and the library installed). Set to `False` to load in default precision (typically `bfloat16` as specified in the script), requiring significantly more VRAM.
-*   `ENABLE_CPU_OFFLOAD` (bool): Enable offloading model layers to CPU when needed.
-*   `MAX_GPU_MEMORY` (str): Limit GPU memory usage to this amount.
-*   `Generation Parameters` (within `model.generate` call): Parameters like `max_new_tokens`, `do_sample`, `temperature`, etc., can be tuned to influence the model's output generation behavior.
+The project is dockerized for easy deployment across different environments and GPU instances.
 
-## 5. Setup Instructions
+**Prerequisites:**
+- Docker and Docker Compose installed
+- NVIDIA Container Toolkit (for GPU support)
+- HuggingFace account and access token (for downloading Llama 4 Scout model)
+- Gemini API key (optional, for comparison)
 
-**5.1. Prerequisites:**
+**Running with Docker:**
 
-*   **Hardware:**
-    *   **GPU:** Mandatory for practical execution. An **NVIDIA H100 (80GB VRAM)** or equivalent accelerator is highly recommended, especially for contexts approaching 10M tokens, even with 4-bit quantization. The primary bottleneck is the **KV Cache**, whose memory requirement scales linearly with context length and dominates VRAM usage.
-    *   **RAM:** A large amount of system RAM (e.g., 128GB+) is advisable to handle data loading, potential model layer offloading (`device_map="auto"`), and general system overhead.
-    *   **Storage:** Sufficient disk space for the virtual environment, libraries, and potentially downloading large model weights.
-*   **Software:**
-    *   Python (>= 3.8 recommended).
-    *   `git` (for cloning).
-    *   NVIDIA Drivers, CUDA Toolkit, cuDNN (if using NVIDIA GPU). Ensure compatibility between drivers, CUDA version, and the installed `torch` version.
+1. **Clone the repository:**
+   ```bash
+   git clone <repository-url>
+   cd llama4-long-context
+   ```
 
-**5.2. Installation Steps:**
+2. **Make the run script executable:**
+   ```bash
+   chmod +x run-docker.sh
+   ```
+
+3. **Run the tests using the helper script:**
+   ```bash
+   # Show help
+   ./run-docker.sh
+   
+   # Run interactive setup
+   ./run-docker.sh setup
+   
+   # Run comparison with specific context size (in test mode)
+   ./run-docker.sh compare 100000
+   
+   # Run full comparison (no test mode)
+   ./run-docker.sh compare-full 1000000
+   
+   # Run Llama test only
+   ./run-docker.sh llama
+   
+   # Get a shell in the container
+   ./run-docker.sh shell
+   ```
+
+4. **Set Gemini API key for comparison (optional):**
+   ```bash
+   export GEMINI_API_KEY="your-api-key-here"
+   ./run-docker.sh setup
+   ```
+
+5. **Results will be saved to:**
+   ```
+   ./comparison_results/
+   ```
+
+### 4.2 Manual Setup (Alternative)
+
+Alternatively, you can run the scripts directly:
 
 1.  **Clone Repository:**
     ```bash
@@ -114,6 +151,19 @@ Key parameters can be adjusted within `long_context_test.py`:
     ```
     Enter your access token when prompted.
 
+## 5. Configuration
+
+Key parameters can be adjusted within `long_context_test.py`:
+
+*   `TARGET_CHAR_COUNT` (int): The approximate number of characters to generate for the haystack. Aim for ~4 characters per token (e.g., `40_000_000` for 10M tokens). **Start small (e.g., `10_000`) to test the pipeline before attempting massive contexts.**
+*   `NEEDLE` (str): The specific piece of information to hide in the haystack.
+*   `QUESTION` (str): The question posed to the LLM, designed to be answerable only by retrieving the `NEEDLE`.
+*   `MODEL_ID` (str): The Hugging Face Hub identifier for the model.
+*   `USE_4BIT_QUANTIZATION` (bool): Set to `True` to enable 4-bit loading via `bitsandbytes` (requires compatible hardware/OS and the library installed).
+*   `ENABLE_CPU_OFFLOAD` (bool): Enable offloading model layers to CPU when needed.
+*   `MAX_GPU_MEMORY` (str): Limit GPU memory usage to this amount.
+*   `Generation Parameters` (within `model.generate` call): Parameters like `max_new_tokens`, `do_sample`, `temperature`, etc., can be tuned to influence the model's output generation behavior.
+
 ## 6. Running the Tests
 
 ### 6.1 Llama 4 Scout Long Context Test
@@ -121,6 +171,10 @@ Key parameters can be adjusted within `long_context_test.py`:
 To run the original Llama 4 Scout 10M context test:
 
 ```bash
+# With Docker:
+./run-docker.sh llama
+
+# Without Docker:
 python long_context_test.py
 ```
 
@@ -129,15 +183,21 @@ python long_context_test.py
 The comparison script allows you to benchmark Llama 4 Scout against Google's Gemini model:
 
 ```bash
+# With Docker:
+export GEMINI_API_KEY="your-api-key-here"
+./run-docker.sh compare 100000  # Test mode with 100K chars
+./run-docker.sh compare-full 100000  # Full inference with 100K chars
+
+# Without Docker:
 # Set your Gemini API key
 export GEMINI_API_KEY="your-api-key-here"
 
-# Run the comparison with default settings (2M tokens)
+# Run the comparison with default settings
 python model_comparison.py
 
 # Or specify custom parameters
-python model_comparison.py --char-count 4000000 --llama-only
-python model_comparison.py --char-count 8000000 --gemini-only --gemini-api-key "your-key"
+python model_comparison.py --char-count 100000 --llama-only --test-mode
+python model_comparison.py --char-count 1000000 --gemini-only --gemini-api-key "your-key"
 ```
 
 For convenience, you can use the automated script:
@@ -148,13 +208,28 @@ For convenience, you can use the automated script:
 
 This will guide you through the setup and running process interactively.
 
-## 7. Memory Optimization
+## 7. Scaling Strategy
+
+To tackle the 10M token context challenge, we recommend this progressive approach:
+
+1. **Start Small**: Begin with 10,000 characters (~2.5K tokens) to test basic functionality
+2. **Gradual Scaling**: Incrementally increase to 100K, then 1M, then 8M characters
+3. **Test Mode First**: Use `--test-mode` to verify model loading and processing without full inference
+4. **Hardware Scaling**: 
+   - For 2M tokens: Single H100 GPU (80GB) with heavy CPU offloading
+   - For 10M tokens: Multiple GPUs (2-4× H100s) or specialized hardware
+
+Each successful test validates the model's functionality at that scale before moving to larger contexts.
+
+## 8. Memory Optimization
 
 To address memory constraints, especially when running on cloud GPUs like H100, the scripts implement several optimizations:
 
 - **4-bit Quantization**: Reduces model weight memory by loading in 4-bit precision using bitsandbytes
 - **CPU Offloading**: Automatically offloads less frequently used model layers to system RAM
 - **Memory Limits**: Sets explicit memory limits to avoid OOM errors
+- **Chunked Processing**: Processes very long contexts in smaller manageable chunks
+- **Selective Windows**: For generation, uses a context window around the needle location
 - **Resource Monitoring**: Tracks system and GPU resources throughout execution
 - **Memory Management**: Properly frees resources after use to prevent memory leaks
 
@@ -163,7 +238,7 @@ For particularly large contexts (approaching 10M tokens), you may need:
 - A system with 128GB+ of RAM for CPU offloading
 - Appropriate CUDA configuration to prevent memory fragmentation
 
-## 8. Model Comparison
+## 9. Model Comparison
 
 The `model_comparison.py` script enables side-by-side evaluation of:
 
@@ -178,7 +253,22 @@ The script records:
 
 Results are saved to JSON files in the `comparison_results/` directory for later analysis.
 
-## 9. Troubleshooting
+## 10. Hardware Requirements
+
+**For 10M token contexts with Llama 4 Scout:**
+- **GPU Memory**: ~320-400GB (combined) - due to KV cache scaling linearly with context length
+- **System RAM**: 128GB+ for CPU offloading and model operations
+- **Storage**: 20GB+ for model weights and cache
+- **Recommended Setup**: 4× H100 GPUs (80GB each) or equivalent
+
+**For 2M token contexts with Llama 4 Scout:**
+- **GPU Memory**: 80GB minimum with heavy CPU offloading
+- **System RAM**: 64GB+ for CPU offloading
+- **Recommended Setup**: 1× H100 GPU (80GB) or equivalent
+
+These requirements are based on Meta's research on long-context models and practical testing.
+
+## 11. Troubleshooting
 
 *   **`CUDA out of memory`:**
     *   The most common issue with large contexts.
@@ -201,8 +291,12 @@ Results are saved to JSON files in the `comparison_results/` directory for later
     *   Verify API key is correct
     *   Check API rate limits and quotas
     *   For very large contexts, consider increasing request timeouts
+*   **Docker Issues:**
+    *   Ensure nvidia-docker is installed and configured correctly
+    *   Check `docker info | grep -i runtime` shows nvidia
+    *   If CUDA version mismatch occurs, adjust the base image in Dockerfile
 
-## 10. Limitations
+## 12. Limitations
 
 *   **Simplistic Haystack:** Uses basic text repetition, which may not accurately reflect the complexity of real-world documents.
 *   **Fixed Needle Placement:** Inserts the needle randomly, but doesn't systematically test different positions (e.g., start, middle, end) which can affect performance.
@@ -210,7 +304,7 @@ Results are saved to JSON files in the `comparison_results/` directory for later
 *   **Hardware Dependency:** Requires high-end, specific GPU hardware, limiting accessibility.
 *   **Model Availability:** Relies on the target LLM being released and accessible via Hugging Face Hub.
 
-## 11. Future Work & Potential Improvements
+## 13. Future Work & Potential Improvements
 
 *   **Advanced Haystack Generation:** Incorporate more diverse and realistic text sources (e.g., Wikipedia dumps, ArXiv papers, code repositories).
 *   **Systematic Needle Placement:** Add options to place the needle at specific relative positions within the context (e.g., 0%, 25%, 50%, 75%, 100%).
@@ -221,10 +315,10 @@ Results are saved to JSON files in the `comparison_results/` directory for later
 *   **Context Length Sweeping:** Automate running tests across a range of `TARGET_CHAR_COUNT` values to plot performance vs. context length.
 *   **Visualization:** Generate plots showing success rate vs. context length or needle position.
 
-## 12. Contributing
+## 14. Contributing
 
 (Placeholder - detail contribution guidelines if applicable, e.g., pull requests, issue reporting).
 
-## 13. License
+## 15. License
 
 (Placeholder - e.g., MIT License, Apache 2.0).
