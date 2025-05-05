@@ -20,16 +20,14 @@ QUESTION = "What is the secret passphrase for the blueberry muffin recipe?"
 # --- Hugging Face Model Configuration ---
 MODEL_ID = "meta-llama/Llama-4-Scout-17B-16E-Instruct"
 
-# Configuration for 4-bit quantization (requires bitsandbytes)
-USE_4BIT_QUANTIZATION = True
-
-# Advanced memory management options
-OFFLOAD_FOLDER = "./offload_folder"
+# Configuration for memory management - these will be checked at runtime
+# and only used if available
+USE_4BIT_QUANTIZATION = True  # Will be auto-disabled if bitsandbytes not available
 ENABLE_CPU_OFFLOAD = True
 MAX_GPU_MEMORY = "60GiB"
 MAX_CPU_MEMORY = "200GiB"
 BATCH_SIZE = 1
-USE_FLASH_ATTENTION = True  # Enable if flash-attn is installed
+USE_FLASH_ATTENTION = False  # Changed to False by default since it's causing issues
 ENABLE_CHECKPOINT_ACTIVATION = True
 
 # Add option to track statistics
@@ -41,6 +39,39 @@ RESULTS_FILE = "irope_400k_test_results.json"
 os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "max_split_size_mb:128,expandable_segments:True"
 # Enable iRoPE specifically
 os.environ["LLAMA_USE_IROPE"] = "1"  # Signal to use iRoPE in implementation
+
+# --- Runtime flags that will be set based on available libraries ---
+_has_bitsandbytes = False
+_has_flash_attention = False
+
+# Check for library availability
+def check_library_availability():
+    global _has_bitsandbytes, _has_flash_attention, USE_4BIT_QUANTIZATION, USE_FLASH_ATTENTION
+    
+    print("Checking for optional library availability...")
+    
+    # Check for bitsandbytes
+    try:
+        import bitsandbytes
+        _has_bitsandbytes = True
+        print("✅ bitsandbytes is available - 4-bit quantization enabled")
+    except (ImportError, ModuleNotFoundError):
+        _has_bitsandbytes = False
+        USE_4BIT_QUANTIZATION = False
+        print("❌ bitsandbytes is not available - 4-bit quantization disabled")
+    
+    # Check for flash-attention
+    if USE_FLASH_ATTENTION:
+        try:
+            import flash_attn
+            _has_flash_attention = True
+            print("✅ flash-attention is available")
+        except (ImportError, ModuleNotFoundError):
+            _has_flash_attention = False
+            USE_FLASH_ATTENTION = False
+            print("❌ flash-attention is not available - using standard attention mechanism")
+    else:
+        print("ℹ️ flash-attention is disabled in configuration")
 
 def print_system_info():
     """Print system information for debugging purposes."""
@@ -186,70 +217,118 @@ def load_model_with_extreme_memory_savings():
     """Load the model with most extreme memory saving techniques."""
     print("Loading model with extreme memory saving techniques")
     
-    # Configure 4-bit quantization with double quantization
-    quantization_config = BitsAndBytesConfig(
-        load_in_4bit=True,
-        bnb_4bit_quant_type="nf4",
-        bnb_4bit_compute_dtype=torch.bfloat16,
-        bnb_4bit_use_double_quant=True,
-    )
-
-    # Create explicit device map to heavily offload to CPU
-    device_map = {
-        "model.embed_tokens": 0,  # Keep embeddings on GPU
-        "model.norm": 0,          # Keep final normalization on GPU
-        "lm_head": 0,             # Keep language model head on GPU
-    }
+    # Ensure we have the right libraries available
+    check_library_availability()
+    
+    # Configure quantization if available
+    quantization_config = None
+    if USE_4BIT_QUANTIZATION and _has_bitsandbytes:
+        print("Configuring 4-bit quantization...")
+        from transformers import BitsAndBytesConfig
+        quantization_config = BitsAndBytesConfig(
+            load_in_4bit=True,
+            bnb_4bit_quant_type="nf4",
+            bnb_4bit_compute_dtype=torch.bfloat16,
+            bnb_4bit_use_double_quant=True,
+        )
+    
+    # Create explicit device map for offloading
+    device_map = "auto"  # Default to auto
+    offload_folder = None
+    
+    if ENABLE_CPU_OFFLOAD:
+        print("Configuring CPU offloading...")
+        offload_folder = "./offload_folder"
+        # Create folder if needed
+        if not os.path.exists(offload_folder):
+            os.makedirs(offload_folder)
+            
+        # Create more specific device map if explicitly offloading
+        device_map = {
+            "model.embed_tokens": 0,  # Keep embeddings on GPU
+            "model.norm": 0,          # Keep final normalization on GPU
+            "lm_head": 0,             # Keep language model head on GPU
+        }
     
     # Configure model loading options
     kwargs = {
-        "quantization_config": quantization_config if USE_4BIT_QUANTIZATION else None,
         "torch_dtype": torch.bfloat16,
-        "device_map": device_map if ENABLE_CPU_OFFLOAD else "auto",
-        "offload_folder": OFFLOAD_FOLDER if ENABLE_CPU_OFFLOAD else None,
-        "offload_state_dict": ENABLE_CPU_OFFLOAD,
+        "device_map": device_map,
         "low_cpu_mem_usage": True,
         "max_memory": {0: MAX_GPU_MEMORY, "cpu": MAX_CPU_MEMORY},
         "trust_remote_code": True,
     }
     
-    # Add flash attention if available
-    if USE_FLASH_ATTENTION:
-        try:
-            import flash_attn
-            print("Flash Attention 2 is available, enabling...")
-            kwargs["attn_implementation"] = "flash_attention_2"
-        except ImportError:
-            print("Flash Attention 2 not available, falling back to standard attention")
+    # Add quantization config if available
+    if quantization_config is not None:
+        kwargs["quantization_config"] = quantization_config
     
-    # Load model with specified options
-    model = AutoModelForCausalLM.from_pretrained(MODEL_ID, **kwargs)
+    # Add offloading options if enabled
+    if ENABLE_CPU_OFFLOAD:
+        kwargs["offload_folder"] = offload_folder
+        kwargs["offload_state_dict"] = True
     
-    # Apply model-specific optimizations
-    if hasattr(model, "config") and hasattr(model.config, "pretraining_tp"):
-        model.config.pretraining_tp = 1  # Ensure tensor parallelism is disabled
+    # Add flash attention if available and enabled
+    if USE_FLASH_ATTENTION and _has_flash_attention:
+        print("Enabling Flash Attention 2...")
+        kwargs["attn_implementation"] = "flash_attention_2"
     
-    # Enable the use of iRoPE if supported by the model
-    if hasattr(model.config, "rope_theta"):
-        print("Setting RoPE theta scaling for better length extrapolation...")
-        # Use a lower base frequency for better long-context handling
-        model.config.rope_theta = 10000.0 * 2.0
-        print(f"RoPE theta set to: {model.config.rope_theta}")
+    # Print key configuration
+    print(f"Model loading configuration:")
+    print(f"- 4-bit quantization: {'Enabled' if USE_4BIT_QUANTIZATION and _has_bitsandbytes else 'Disabled'}")
+    print(f"- CPU offloading: {'Enabled' if ENABLE_CPU_OFFLOAD else 'Disabled'}")
+    print(f"- Flash Attention: {'Enabled' if USE_FLASH_ATTENTION and _has_flash_attention else 'Disabled'}")
     
-    if hasattr(model.config, "rope_scaling"):
-        print("Configuring RoPE scaling parameters for length extrapolation...")
-        # Apply scaling factor for RoPE to better handle longer sequences
-        model.config.rope_scaling = {"type": "linear", "factor": 4.0}
-        print(f"RoPE scaling config: {model.config.rope_scaling}")
-    
-    # Log if iRoPE is being used (depends on model implementation)
-    if os.environ.get("LLAMA_USE_IROPE") == "1":
-        print("iRoPE is explicitly enabled via environment variable")
-    
-    if ENABLE_CHECKPOINT_ACTIVATION:
-        model.gradient_checkpointing_enable()
-    
-    return model
+    try:
+        # Load model with configured options
+        print(f"Loading model {MODEL_ID}...")
+        from transformers import AutoModelForCausalLM
+        model = AutoModelForCausalLM.from_pretrained(MODEL_ID, **kwargs)
+        
+        # Apply model-specific optimizations
+        if hasattr(model, "config") and hasattr(model.config, "pretraining_tp"):
+            model.config.pretraining_tp = 1  # Ensure tensor parallelism is disabled
+        
+        # Enable the use of iRoPE if supported by the model
+        if hasattr(model.config, "rope_theta"):
+            print("Setting RoPE theta scaling for better length extrapolation...")
+            # Use a lower base frequency for better long-context handling
+            model.config.rope_theta = 10000.0 * 2.0
+            print(f"RoPE theta set to: {model.config.rope_theta}")
+        
+        if hasattr(model.config, "rope_scaling"):
+            print("Configuring RoPE scaling parameters for length extrapolation...")
+            # Apply scaling factor for RoPE to better handle longer sequences
+            model.config.rope_scaling = {"type": "linear", "factor": 4.0}
+            print(f"RoPE scaling config: {model.config.rope_scaling}")
+        
+        # Log if iRoPE is being used (depends on model implementation)
+        if os.environ.get("LLAMA_USE_IROPE") == "1":
+            print("iRoPE is explicitly enabled via environment variable")
+        
+        if ENABLE_CHECKPOINT_ACTIVATION:
+            model.gradient_checkpointing_enable()
+            
+        print("Model loaded successfully!")
+        return model
+        
+    except Exception as e:
+        print(f"\n❌ Error loading model: {str(e)}")
+        
+        if "bitsandbytes" in str(e).lower() and USE_4BIT_QUANTIZATION:
+            print("\nTrying again without 4-bit quantization...")
+            # Retry without quantization
+            USE_4BIT_QUANTIZATION = False
+            return load_model_with_extreme_memory_savings()
+            
+        if "401" in str(e) or "unauthorized" in str(e).lower():
+            print("\nAuthentication error with Hugging Face!")
+            print("Please make sure you have access to this model and have logged in with:")
+            print("  huggingface-cli login")
+            print("Or set the HF_TOKEN environment variable with your access token.")
+            
+        # Re-raise the exception to be caught by the main function
+        raise
 
 def process_with_streaming(tokenizer, model, prompt):
     """Process the prompt and generate response with streaming output."""
@@ -349,6 +428,9 @@ def main():
     print("--- Starting iRoPE 400K Token Context Test ---")
     print_system_info()
 
+    # Check available libraries before proceeding
+    check_library_availability()
+
     # Track test statistics
     test_stats = {
         "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
@@ -359,20 +441,52 @@ def main():
             "gpu": torch.cuda.get_device_name(0) if torch.cuda.is_available() else "None",
             "total_gpu_memory_gb": torch.cuda.get_device_properties(0).total_memory / (1024**3) if torch.cuda.is_available() else 0,
             "total_ram_gb": psutil.virtual_memory().total / (1024**3)
+        },
+        "settings": {
+            "4bit_quantization": USE_4BIT_QUANTIZATION,
+            "flash_attention": USE_FLASH_ATTENTION,
+            "cpu_offload": ENABLE_CPU_OFFLOAD
         }
     }
 
     # 1. Generate Haystack
-    haystack = generate_filler_text(TARGET_CHAR_COUNT)
-    test_stats["actual_char_count"] = len(haystack)
+    print("\n--- Step 1: Generating haystack text ---")
+    try:
+        haystack = generate_filler_text(TARGET_CHAR_COUNT)
+        test_stats["actual_char_count"] = len(haystack)
+    except Exception as e:
+        print(f"❌ Error generating haystack: {e}")
+        if LOG_RESULTS:
+            test_stats["status"] = "error"
+            test_stats["error"] = f"Haystack generation error: {str(e)}"
+            log_results(test_stats)
+        return
 
     # 2. Insert Needle at 50% position
-    text_with_needle, needle_position = insert_needle(haystack, NEEDLE, position_percentage=50)
-    test_stats["needle_position_percent"] = needle_position
+    print("\n--- Step 2: Inserting needle into haystack ---")
+    try:
+        text_with_needle, needle_position = insert_needle(haystack, NEEDLE, position_percentage=50)
+        test_stats["needle_position_percent"] = needle_position
+    except Exception as e:
+        print(f"❌ Error inserting needle: {e}")
+        if LOG_RESULTS:
+            test_stats["status"] = "error" 
+            test_stats["error"] = f"Needle insertion error: {str(e)}"
+            log_results(test_stats)
+        return
 
     # 3. Create Prompt
-    final_prompt = create_prompt(text_with_needle, QUESTION)
-    test_stats["prompt_length_chars"] = len(final_prompt)
+    print("\n--- Step 3: Creating prompt ---")
+    try:
+        final_prompt = create_prompt(text_with_needle, QUESTION)
+        test_stats["prompt_length_chars"] = len(final_prompt)
+    except Exception as e:
+        print(f"❌ Error creating prompt: {e}")
+        if LOG_RESULTS:
+            test_stats["status"] = "error"
+            test_stats["error"] = f"Prompt creation error: {str(e)}"
+            log_results(test_stats)
+        return
 
     # --- Prepare for LLM Interaction ---
     print("\n--- Preparing for Model Interaction ---")
@@ -384,10 +498,6 @@ def main():
     del text_with_needle
     clear_gpu_memory()
 
-    # Create offload folder if it doesn't exist
-    if ENABLE_CPU_OFFLOAD and not os.path.exists(OFFLOAD_FOLDER):
-        os.makedirs(OFFLOAD_FOLDER)
-
     # --- Load Tokenizer and Model ---
     print("\n--- Loading Tokenizer and Model ---")
     load_start_time = time.time()
@@ -398,6 +508,7 @@ def main():
     try:
         # Load tokenizer
         print(f"Loading tokenizer...")
+        from transformers import AutoTokenizer
         tokenizer = AutoTokenizer.from_pretrained(MODEL_ID, trust_remote_code=True)
         if tokenizer.pad_token is None:
             tokenizer.pad_token = tokenizer.eos_token
@@ -445,7 +556,18 @@ def main():
         traceback.print_exc()
         test_stats["status"] = "error"
         test_stats["error"] = str(e)
-    
+        
+        # Check for common errors and provide helpful messages
+        error_str = str(e).lower()
+        if "401" in error_str or "unauthorized" in error_str:
+            print("\n--- Authentication Error ---")
+            print("You need to log in to Hugging Face to access this model.")
+            print("Run: huggingface-cli login")
+            print("Or set the HF_TOKEN environment variable.")
+        elif "cuda" in error_str or "gpu" in error_str or "memory" in error_str:
+            print("\n--- GPU Memory Error ---")
+            print("Try reducing TARGET_CHAR_COUNT or disabling features.")
+        
     finally:
         # Clean up GPU memory
         if 'model' in locals() and model is not None:

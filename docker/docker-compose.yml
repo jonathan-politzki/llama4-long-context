@@ -1,0 +1,28 @@
+version: '3.8'
+
+services:
+  llama-test:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: llama4-long-context
+    volumes:
+      - ../results:/app/results
+      - ~/.huggingface:/root/.huggingface
+    environment:
+      - CUDA_VISIBLE_DEVICES=0
+      - HF_TOKEN=${HF_TOKEN}
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - HF_HOME=/root/.huggingface
+      - PYTHONPATH=/app
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    tty: true
+    stdin_open: true
+    entrypoint: ["/bin/sh", "-c"]
+    command: ["exec /bin/bash"] 
