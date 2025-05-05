@@ -28,6 +28,9 @@ COPY requirements.txt .
 # Install pip dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
+# Install flash-attention for improved performance
+RUN pip install --no-cache-dir flash-attn
+
 # Copy project files
 COPY *.py *.sh README.md ./
 

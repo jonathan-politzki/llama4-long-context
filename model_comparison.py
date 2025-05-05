@@ -140,7 +140,7 @@ def clear_gpu_memory():
 
 def load_llama_with_multi_gpu():
     """Load Llama model distributed across multiple GPUs."""
-    print("Loading Llama model with multi-GPU support")
+    print("Loading Llama model with multi-GPU support and Flash Attention 2")
     
     # Configure quantization
     quantization_config = BitsAndBytesConfig(
@@ -159,6 +159,7 @@ def load_llama_with_multi_gpu():
         offload_folder=OFFLOAD_FOLDER if ENABLE_CPU_OFFLOAD else None,
         offload_state_dict=ENABLE_CPU_OFFLOAD,
         low_cpu_mem_usage=True,
+        attn_implementation="flash_attention_2",  # Enable Flash Attention 2
         trust_remote_code=True,
     )
     

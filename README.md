@@ -322,3 +322,58 @@ These requirements are based on Meta's research on long-context models and pract
 ## 15. License
 
 (Placeholder - e.g., MIT License, Apache 2.0).
+
+# Context Compression Techniques
+
+When working with extremely large contexts, compression techniques can significantly reduce memory requirements with minimal loss of information:
+
+## RepC (Representation Compression)
+
+RepC is a context compression technique designed for large language models that can reduce context sizes by 2-4x.
+
+**How it works:**
+1. Uses a compression model to generate dense, semantically meaningful representations of text
+2. These representations are much more compact than the original text
+3. A small adaptor layer is trained to help the model interpret these compressed representations
+
+**Benefits:**
+- Achieves 2-4x compression ratio
+- Minimal impact on response quality (typically <2% drop in accuracy)
+- Compatible with most decoder-only LLMs like Llama 4
+
+**Drawbacks:**
+- Requires an additional compression model
+- Small computational overhead during preprocessing
+
+## LLMLingua
+
+LLMLingua is a prompt compression technique that can reduce context sizes by 2-3x.
+
+**How it works:**
+1. Uses an importance-guided approach to identify and retain key tokens
+2. Removes less important tokens while preserving context structure
+3. Maintains tokens most relevant to task completion
+
+**Benefits:**
+- 2-3x compression with minimal quality degradation
+- No need for additional training
+- Works with any LLM as a preprocessing step
+
+**Drawbacks:**
+- May occasionally remove important details
+- Compression ratio depends on content type
+
+## Comparison to Flash Attention 2
+
+Unlike context compression which reduces input size, Flash Attention 2 is an algorithm optimization:
+
+- **Flash Attention 2:** Optimizes how attention is computed, reducing memory usage by 30-40% without changing inputs
+- **Context Compression:** Reduces actual input size, leading to 2-4x memory savings but with potential information loss
+
+For maximum efficiency, both techniques can be combined - compress the context first, then use Flash Attention 2 during inference.
+
+# Implementation Plan
+
+1. **Phase 1 (Current):** Enable Flash Attention 2 to test maximum achievable context
+2. **Phase 2:** Implement LLMLingua preprocessing for further gains if needed
+3. **Phase 3:** Consider hardware scaling for production deployment
