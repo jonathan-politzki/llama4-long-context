@@ -4,6 +4,9 @@ import sys
 import torch # Added for dtype and device management
 from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig # Added Hugging Face imports
 import gc # Garbage collection
+import time # Add time import
+
+print(f"--- Script executed at: {time.time()} ---") # Add this line
 
 # --- Configuration ---
 TARGET_CHAR_COUNT = 1_000_000 # Start smaller (e.g., 1M chars ~ 250k tokens), increase later to ~40M chars for 10M tokens
@@ -15,7 +18,7 @@ QUESTION = "What is the secret passphrase for the blueberry muffin recipe?"
 MODEL_ID = "meta-llama/Llama-4-Scout-17B-16E-Instruct"  # Official ID from Hugging Face
 
 # Configuration for 4-bit quantization (requires bitsandbytes)
-USE_4BIT_QUANTIZATION = False # Set to False if not using quantization or hardware doesn't support it well
+USE_4BIT_QUANTIZATION = True # Set to False if not using quantization or hardware doesn't support it well
 # --- ---
 
 def generate_filler_text(char_count):
@@ -85,6 +88,7 @@ def main():
     quantization_config = None
 
     try:
+        print(f"DEBUG: Value of USE_4BIT_QUANTIZATION before if: {USE_4BIT_QUANTIZATION}, Type: {type(USE_4BIT_QUANTIZATION)}")
         if USE_4BIT_QUANTIZATION:
              print("Using 4-bit quantization (requires bitsandbytes library).")
              quantization_config = BitsAndBytesConfig(
